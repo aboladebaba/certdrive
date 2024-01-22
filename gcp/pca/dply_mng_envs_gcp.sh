@@ -520,3 +520,208 @@ watch -n 2 gcloud compute operations list \
 # The managed instance group recreated the instance to repair it.
 # You can also go to Navigation menu > Compute Engine > VM instances to monitor through the Console.
 gcloud compute instances describe fancy-fe-new --zone=$ZONE | grep machineType 
+
+# LAB 3: Orchestrating the Cloud with Kubernetes
+
+# Set Zone
+gcloud config set compute/zone us-east4-b
+
+# Create / Start up a cluster
+gcloud container clusters create io
+
+# Task 2. Quick Kubernetes Demo
+
+# Use it to launch a single instance of the nginx container:
+kubectl create deployment nginx --image=nginx:1.10.0
+
+# Use the kubectl get pods command to view the running nginx container:
+kubectl get pods
+
+# Once the containers are running, us the ccommanbelow to expose it outside of Kubernetes
+kubectl expose deployment nginx --port 80 --type LoadBalancer
+
+# List Services running
+kubectl get services
+
+## Pods represent and hold a collection of one or more containers. Generally, if you have multiple containers with a hard dependency on each other, you package the containers inside a single pod.
+
+# Task 4. Creating pods
+
+# Create a monolith pod using the yaml file
+kubectl create -f pods/monolith.yaml
+kubectl describe pods monolith
+
+# Task 5. Interacting with pods
+# By default, pods are allocated a private IP address and cannot be reached outside of the cluster. Use the kubectl port-forward command to map a local port to a port inside the monolith pod.
+kubectl port-forward monolith 10080:80
+
+# This will work:
+curl http://127.0.0.1:10080
+
+# This will not when you tried a secure endpoint
+curl http://127.0.0.1:10080/secure
+
+# Since Cloud Shell does not handle copying long strings well, create an environment variable for the token.
+TOKEN=$(curl http://127.0.0.1:10080/login -u user|jq -r '.token')
+
+# Now this will work:
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:10080/secure
+
+# You can also get some logs with :
+kubectl logs monolith
+
+# Use the kubectl exec command to run an interactive shell inside the Monolith Pod. This can come in handy when you want to troubleshoot from within a container:
+kubectl exec monolith --stdin --tty -c monolith -- /bin/sh
+
+
+# Task 6. Services
+# Pods aren't meant to be persistent. They can be stopped or started for many reasons - like failed liveness or readiness checks - and this leads to a problem:
+# What happens if you want to communicate with a set of Pods? When they get restarted they might have a different IP address.
+# That's where Services come in. Services provide stable endpoints for Pods.
+
+
+# Task 7. Creating a service
+
+# Create the secure-monolith pods and their configuration data:
+kubectl create secret generic tls-certs --from-file tls/
+# secret/tls-certs created
+kubectl create configmap nginx-proxy-conf --from-file nginx/proxy.conf
+# configmap/nginx-proxy-conf created
+kubectl create -f pods/secure-monolith.yaml
+# pod/secure-monolith created
+
+# create the monolith service from the monolith service configuration file:
+kubectl create -f services/monolith.yaml
+# service/monolith created
+
+# Use the gcloud compute firewall-rules command to allow traffic to the monolith service on the exposed nodeport:
+gcloud compute firewall-rules create allow-monolith-nodeport \
+  --allow=tcp:31000
+
+# get an external IP address for one of the nodes.
+gcloud compute instances list
+
+# Now try hitting the secure-monolith service using curl:
+curl -k https://35.199.38.163:31000
+### Error encountered.
+
+# Use the following commands to get answers to why you got the error above
+  # Questions:
+  # Why are you unable to get a response from the monolith service? No labels were assigned
+  # How many endpoints does the monolith service have? 
+  # What labels must a Pod have to be picked up by the monolith service?
+
+kubectl get services monolith
+# NAME       TYPE       CLUSTER-IP    EXTERNAL-IP   PORT(S)         AGE
+# monolith   NodePort   10.96.2.142   <none>        443:31000/TCP   4m12s
+
+kubectl describe services monolith
+# Name:                     monolith
+# Namespace:                default
+# Labels:                   <none>
+# Annotations:              cloud.google.com/neg: {"ingress":true}
+# Selector:                 app=monolith,secure=enabled
+# Type:                     NodePort
+# IP Family Policy:         SingleStack
+# IP Families:              IPv4
+# IP:                       10.96.2.142
+# IPs:                      10.96.2.142
+# Port:                     <unset>  443/TCP
+# TargetPort:               443/TCP
+# NodePort:                 <unset>  31000/TCP
+# Endpoints:                <none>
+# Session Affinity:         None
+# External Traffic Policy:  Cluster
+# Events:                   <none>
+
+# Check how many pods you have running with the label "app=monolith": 3 pods 1 monolith, 2 ngnix
+kubectl get pods -l "app=monolith"
+# NAME              READY   STATUS    RESTARTS   AGE
+# monolith          1/1     Running   0          23m
+# secure-monolith   2/2     Running   0          11m
+
+# Check how many has secure-enabled ?
+kubectl get pods -l "app=monolith,secure=enabled" # yield no result
+
+# Use the kubectl label command to add the missing secure=enabled label to the secure-monolith Pod
+kubectl label pods secure-monolith 'secure=enabled'
+# pod/secure-monolith labeled
+
+# now query for secured label
+kubectl get pods secure-monolith --show-labels
+# NAME              READY   STATUS    RESTARTS   AGE   LABELS
+# secure-monolith   2/2     Running   0          16m   app=monolith,secure=enabled
+
+# Now that your pods are correctly labeled, view the list of endpoints on the monolith service:
+kubectl describe services monolith | grep Endpoints
+# Endpoints:                10.92.0.6:443
+
+# List for External Ip
+gcloud compute instances list
+NAME: gke-io-default-pool-9c5f891b-07hh
+ZONE: us-east4-b
+MACHINE_TYPE: e2-medium
+PREEMPTIBLE: 
+INTERNAL_IP: 10.150.0.4
+EXTERNAL_IP: 35.199.45.118
+STATUS: RUNNING
+
+NAME: gke-io-default-pool-9c5f891b-94tp
+ZONE: us-east4-b
+MACHINE_TYPE: e2-medium
+PREEMPTIBLE: 
+INTERNAL_IP: 10.150.0.5
+EXTERNAL_IP: 35.199.38.163
+STATUS: RUNNING
+
+NAME: gke-io-default-pool-9c5f891b-gzh0
+ZONE: us-east4-b
+MACHINE_TYPE: e2-medium
+PREEMPTIBLE: 
+INTERNAL_IP: 10.150.0.3
+EXTERNAL_IP: 34.145.167.243
+STATUS: RUNNING
+
+# Test this out by hitting one of our nodes again.
+curl -k https://34.145.167.243:31000 
+
+
+# Task 9. Deploying applications with Kubernetes
+# Deployments are a declarative way to ensure that the number of Pods running is equal to the desired number of Pods, specified by the user.
+# The main benefit of Deployments is in abstracting away the low level details of managing Pods. Behind the scenes Deployments use Replica Sets to manage starting and stopping the Pods. If Pods need to be updated or scaled, the Deployment will handle that. Deployment also handles restarting Pods if they happen to go down for some reason.
+
+# Task 10. Creating deployments
+# You're going to break the monolith app into three separate pieces:
+  # auth - Generates JWT tokens for authenticated users.
+  # hello - Greet authenticated users.
+  # frontend - Routes traffic to the auth and hello services.
+
+# Create your deployment object:
+kubectl create -f deployments/auth.yaml
+    #deployment.apps/auth created
+
+# Create the auth service:
+kubectl create -f services/auth.yaml
+    # service/auth created
+
+# Now do the same thing to create and expose the hello deployment:
+kubectl create -f deployments/hello.yaml
+    # deployment.apps/hello created
+kubectl create -f services/hello.yaml
+    # service/hello created
+
+# Add one more deployment to create and expose the frontend Deployment.
+kubectl create configmap nginx-frontend-conf --from-file=nginx/frontend.conf
+    # configmap/nginx-frontend-conf created
+kubectl create -f deployments/frontend.yaml
+    # deployment.apps/frontend created
+kubectl create -f services/frontend.yaml
+    # service/frontend created
+
+# kubectl get services frontend
+    # NAME       TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)         AGE
+    # frontend   LoadBalancer   10.96.12.247   34.48.38.83   443:31880/TCP   73s
+
+# Test with the external IP
+curl -k https://34.48.38.83
+    # {"message":"Hello"}
