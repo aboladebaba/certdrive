@@ -875,52 +875,266 @@ iperf -c us-test-01.us-east1-b -P 20
 # LAB 5: Cloud Logging to Analyze BigQuery Usage
 # Console walkthrough for BigQuery.
 
+# Lab 6: Migrate to Cloud SQL for PostgreSQL using Database Migration Service
+
+# Task 1. Prepare the source database for migration
+# Upgrade the database with the pglogical extension
+
+# Install the pglogical database extension:
+sudo apt install postgresql-13-pglogical
+
+# Download and apply some additions to the PostgreSQL configuration files (to enable pglogical extension) and restart the postgresql service:
+sudo su - postgres -c "gsutil cp gs://cloud-training/gsp918/pg_hba_append.conf ."
+sudo su - postgres -c "gsutil cp gs://cloud-training/gsp918/postgresql_append.conf ."
+sudo su - postgres -c "cat pg_hba_append.conf >> /etc/postgresql/13/main/pg_hba.conf"
+sudo su - postgres -c "cat postgresql_append.conf >> /etc/postgresql/13/main/postgresql.conf"
+
+# Restart the Posgres server
+sudo systemctl restart postgresql@13-main
+
+# Launch the psql tool:
+sudo su - postgres
+psql
+
+# Add the pglogical database extension to the postgres, orders and gmemegen_db databases.
+\c postgres;
+CREATE EXTENSION pglogical;
+\c postgres;
+CREATE EXTENSION pglogical;
+\c orders;
+CREATE EXTENSION pglogical;
+\c gmemegen_db;
+CREATE EXTENSION pglogical;
+
+# List the PostgreSQL databases on the server:
+\l
+:'
+sudo su - postgres
+postgres@postgresql-vm:~$ psql
+psql (13.13 (Debian 13.13-1.pgdg110+1))
+Type "help" for help.
+
+postgres=# \c postgres;
+You are now connected to database "postgres" as user "postgres".
+postgres=# CREATE EXTENSION pglogical;
+CREATE EXTENSION
+postgres=# \c orders;
+You are now connected to database "orders" as user "postgres".
+orders=# CREATE EXTENSION pglogical;
+CREATE EXTENSION
+orders=# \c gmemegen_db;
+You are now connected to database "gmemegen_db" as user "postgres".
+gmemegen_db=# CREATE EXTENSION pglogical;
+CREATE EXTENSION
+gmemegen_db=# \l
+                               List of databases
+    Name     |  Owner   | Encoding | Collate |  Ctype  |   Access privileges   
+-------------+----------+----------+---------+---------+-----------------------
+ gmemegen_db | postgres | UTF8     | C.UTF-8 | C.UTF-8 | 
+ orders      | postgres | UTF8     | C.UTF-8 | C.UTF-8 | 
+ postgres    | postgres | UTF8     | C.UTF-8 | C.UTF-8 | 
+ template0   | postgres | UTF8     | C.UTF-8 | C.UTF-8 | =c/postgres          +
+             |          |          |         |         | postgres=CTc/postgres
+ template1   | postgres | UTF8     | C.UTF-8 | C.UTF-8 | =c/postgres          +
+             |          |          |         |         | postgres=CTc/postgres
+(5 rows)
+'
+
+# Create the database migration user
+# Create a new user with the replication role:
+CREATE USER migration_admin PASSWORD 'DMS_1s_cool!';
+ALTER DATABASE orders OWNER TO migration_admin;
+ALTER ROLE migration_admin WITH REPLICATION;
+
+# Assign permissions to the migration user
+  # rant permissions to the pglogical schema and tables for the postgres database
+\c postgres;
+GRANT USAGE ON SCHEMA pglogical TO migration_admin;
+GRANT ALL ON SCHEMA pglogical TO migration_admin;
+
+GRANT SELECT ON pglogical.tables TO migration_admin;
+GRANT SELECT ON pglogical.depend TO migration_admin;
+GRANT SELECT ON pglogical.local_node TO migration_admin;
+GRANT SELECT ON pglogical.local_sync_status TO migration_admin;
+GRANT SELECT ON pglogical.node TO migration_admin;
+GRANT SELECT ON pglogical.node_interface TO migration_admin;
+GRANT SELECT ON pglogical.queue TO migration_admin;
+GRANT SELECT ON pglogical.replication_set TO migration_admin;
+GRANT SELECT ON pglogical.replication_set_seq TO migration_admin;
+GRANT SELECT ON pglogical.replication_set_table TO migration_admin;
+GRANT SELECT ON pglogical.sequence_state TO migration_admin;
+GRANT SELECT ON pglogical.subscription TO migration_admin;
+
+# Grant permissions to the pglogical schema and tables for the orders database.
+\c orders;
+GRANT USAGE ON SCHEMA pglogical TO migration_admin;
+GRANT ALL ON SCHEMA pglogical TO migration_admin;
+
+GRANT SELECT ON pglogical.tables TO migration_admin;
+GRANT SELECT ON pglogical.depend TO migration_admin;
+GRANT SELECT ON pglogical.local_node TO migration_admin;
+GRANT SELECT ON pglogical.local_sync_status TO migration_admin;
+GRANT SELECT ON pglogical.node TO migration_admin;
+GRANT SELECT ON pglogical.node_interface TO migration_admin;
+GRANT SELECT ON pglogical.queue TO migration_admin;
+GRANT SELECT ON pglogical.replication_set TO migration_admin;
+GRANT SELECT ON pglogical.replication_set_seq TO migration_admin;
+GRANT SELECT ON pglogical.replication_set_table TO migration_admin;
+GRANT SELECT ON pglogical.sequence_state TO migration_admin;
+GRANT SELECT ON pglogical.subscription TO migration_admin;
+
+# Grant permissions to the public schema and tables for the orders database.
+GRANT USAGE ON SCHEMA public TO migration_admin;
+GRANT ALL ON SCHEMA public TO migration_admin;
+
+GRANT SELECT ON public.distribution_centers TO migration_admin;
+GRANT SELECT ON public.inventory_items TO migration_admin;
+GRANT SELECT ON public.order_items TO migration_admin;
+GRANT SELECT ON public.products TO migration_admin;
+GRANT SELECT ON public.users TO migration_admin;
+
+# Grant permissions to the pglogical schema and tables for the gmemegen_db database.
+\c gmemegen_db;
+
+GRANT USAGE ON SCHEMA pglogical TO migration_admin;
+GRANT ALL ON SCHEMA pglogical TO migration_admin;
+
+GRANT SELECT ON pglogical.tables TO migration_admin;
+GRANT SELECT ON pglogical.depend TO migration_admin;
+GRANT SELECT ON pglogical.local_node TO migration_admin;
+GRANT SELECT ON pglogical.local_sync_status TO migration_admin;
+GRANT SELECT ON pglogical.node TO migration_admin;
+GRANT SELECT ON pglogical.node_interface TO migration_admin;
+GRANT SELECT ON pglogical.queue TO migration_admin;
+GRANT SELECT ON pglogical.replication_set TO migration_admin;
+GRANT SELECT ON pglogical.replication_set_seq TO migration_admin;
+GRANT SELECT ON pglogical.replication_set_table TO migration_admin;
+GRANT SELECT ON pglogical.sequence_state TO migration_admin;
+GRANT SELECT ON pglogical.subscription TO migration_admin;
+
+# Grant permissions to the public schema and tables for the gmemegen_db database.
+GRANT USAGE ON SCHEMA public TO migration_admin;
+GRANT ALL ON SCHEMA public TO migration_admin;
+
+GRANT SELECT ON public.meme TO migration_admin;
+
+:'
+You are now connected to database "orders" as user "postgres".
+                List of relations
+ Schema |         Name         | Type  |  Owner   
+--------+----------------------+-------+----------
+ public | distribution_centers | table | postgres
+ public | inventory_items      | table | postgres
+ public | order_items          | table | postgres
+ public | products             | table | postgres
+ public | users                | table | postgres
+(5 rows)
+
+orders=# ALTER TABLE public.distribution_centers OWNER TO migration_admin;
+ALTER TABLE public.inventory_items OWNER TO migration_admin;
+ALTER TABLE public.order_items OWNER TO migration_admin;
+ALTER TABLE public.products OWNER TO migration_admin;
+ALTER TABLE public.users OWNER TO migration_admin;
+\dt
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+ALTER TABLE
+                    List of relations
+ Schema |         Name         | Type  |      Owner      
+--------+----------------------+-------+-----------------
+ public | distribution_centers | table | migration_admin
+ public | inventory_items      | table | migration_admin
+ public | order_items          | table | migration_admin
+ public | products             | table | migration_admin
+ public | users                | table | migration_admin
+(5 rows)
+'
+
+# Task 2. Create a Database Migration Service connection profile for a stand-alone PostgreSQL database
+# Console set of Activities.
+
+# Task 3. Create and start a continuous migration job
+# Console set of Activities.
+
+# Allow access to the posgresql-vm instance from automatically allocated IP range
+# Partly console + shell.
+# Get the allocated IP address range. In the Google Cloud Console on the Navigation menu (Navigation menu icon), right-click VPC network > VPC network peering and open it in a new tab.
+# Click on the servicenetworking-googleapis-com entry.
+# In the Imported routes tab, select and copy the Destination IP range (e.g. 10.107.176.0/24).
+10.107.128.0/24
+
+# In the Terminal session on the VM instance, edit the pg_hba.conf file as follows:
+sudo nano /etc/postgresql/13/main/pg_hba.conf
+
+# Restart the PostgreSQL service to make the changes take effect. In the VM instance Terminal session:
+sudo systemctl start postgresql@13-main
+
+# Task 4. Confirm the data in Cloud SQL for PostgreSQL
+# Partly console and shell.
+
+gcloud sql connect postgresql-cloudsql --user=postgres --quiet
+# When prompted for a password, which you previously set, enter:
+supersecret!
+
+# Review the data in the Cloud SQL for PostgreSQL instance
+# To select the database in the PostgreSQL interactive console, run the following command:
+\c orders;
+
+# When prompted for a password, enter:
+supersecret!
+
+# Query the distribution_centers table:
+select * from distribution_centers;
+
+# Exit the PostgreSQL interactive console by typing:
+\q
 
 
+# Update stand-alone source data to test continuous migration
+# In Cloud Shell, type the following commands to connect to the source PostgreSQL instance:
+export VM_NAME=postgresql-vm
+export PROJECT_ID=$(gcloud config list --format 'value(core.project)')
+export POSTGRESQL_IP=$(gcloud compute instances describe ${VM_NAME} \
+  --zone=us-central1-f --format="value(networkInterfaces[0].accessConfigs[0].natIP)")
+echo $POSTGRESQL_IP
+psql -h $POSTGRESQL_IP -p 5432 -d orders -U migration_admin
 
+# When prompted for a password, enter:
+DMS_1s_cool!
 
+# In psql, enter the following commands:
+\c orders;
+insert into distribution_centers values(-80.1918,25.7617,'Miami FL',11);
 
+# Close the interactive psql session:
+\q
 
+# Connect to the Cloud SQL PostgreSQL database to check that updated data has been migrated
+# In Cloud Shell, type the following commands to connect to the destination Cloud SQL PostgreSQL instance:
+gcloud sql connect postgresql-cloudsql --user=postgres --quiet
 
+# When prompted for a password, which you previously set, enter the password for the Cloud SQL instance:
+supersecret!
 
+# You have now activated the PostgreSQL interactive console for the destination instance.
 
+# Review data in Cloud SQL for PostgreSQL database
+# In Cloud Shell, select the active database in the PostgreSQL interactive console:
+\c orders;
 
+# When prompted for a password, which you previously set, enter:
+supersecret!
 
+# Query the distribution_centers table:
+select * from distribution_centers;
 
+# Note that the new row added on the stand-alone orders database, is now present on the migrated database.
+# Exit the PostgreSQL interactive console:
+\q
 
-
-# Step 1: 
-# Step 1: 
-# Step 1: 
-# Step 1: 
-# Step 1: 
-# Step 1: 
-# Step 1: 
-# Step 1: 
-# Step 1: 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Task 5. Promote Cloud SQL to be a stand-alone instance for reading and writing data
+# Console set of Activities.
 
 
