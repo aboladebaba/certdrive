@@ -872,6 +872,8 @@ iperf -s
 iperf -c us-test-01.us-east1-b -P 20
 
 
+# LAB 5: Cloud Logging to Analyze BigQuery Usage
+# Console walkthrough for BigQuery.
 
 
 
