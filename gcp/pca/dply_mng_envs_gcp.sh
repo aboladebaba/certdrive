@@ -725,3 +725,200 @@ kubectl create -f services/frontend.yaml
 # Test with the external IP
 curl -k https://34.48.38.83
     # {"message":"Hello"}
+
+# LAB 4: Networking 101
+
+
+# Task 4. Create custom network with Cloud Shell
+# To create the custom network:
+gcloud compute networks create taw-custom-network --subnet-mode custom
+    # Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-02-2e0530fb5fbb/global/networks/taw-custom-network].
+    # NAME: taw-custom-network
+    # SUBNET_MODE: CUSTOM
+    # BGP_ROUTING_MODE: REGIONAL
+    # IPV4_RANGE: 
+    # GATEWAY_IPV4: 
+    # Instances on this network will not be reachable until firewall rules
+    # are created. As an example, you can allow all internal traffic between
+    # instances as well as SSH, RDP, and ICMP by running:
+    # $ gcloud compute firewall-rules create <FIREWALL_NAME> --network taw-custom-network --allow tcp,udp,icmp --source-ranges <IP_RANGE>
+    # $ gcloud compute firewall-rules create <FIREWALL_NAME> --network taw-custom-network --allow tcp:22,tcp:3389,icmp
+
+# Create 3 Subnets
+gcloud compute networks subnets create subnet-us-east1 \
+   --network taw-custom-network \
+   --region us-east1 \
+   --range 10.0.0.0/16
+    # Created [https://www.googleapis.com/compute/v1/projects/qwiklabs-gcp-02-2e0530fb5fbb/regions/us-east1/subnetworks/subnet-us-east1].
+    # NAME: subnet-us-east1
+    # REGION: us-east1
+    # NETWORK: taw-custom-network
+    # RANGE: 10.0.0.0/16
+    # STACK_TYPE: IPV4_ONLY
+    # IPV6_ACCESS_TYPE: 
+    # INTERNAL_IPV6_PREFIX: 
+    # EXTERNAL_IPV6_PREFIX:
+
+gcloud compute networks subnets create subnet-europe-west1 \
+   --network taw-custom-network \
+   --region europe-west1 \
+   --range 10.1.0.0/16
+
+gcloud compute networks subnets create subnet-us-east4 \
+   --network taw-custom-network \
+   --region us-east4 \
+   --range 10.2.0.0/16
+
+# List your networks:
+gcloud compute networks subnets list \
+   --network taw-custom-network
+
+# Task 5. Adding firewall rules
+
+# Add firewall rules using Cloud Shell
+gcloud compute firewall-rules create nw101-allow-http \
+    --allow tcp:80 \
+    --network taw-custom-network \
+    --source-ranges 0.0.0.0/0 \
+    --target-tags http
+
+gcloud compute firewall-rules create "nw101-allow-icmp" \
+    --allow icmp \
+    --network "taw-custom-network" \
+    --target-tags rules
+
+gcloud compute firewall-rules create "nw101-allow-internal" --allow tcp:0-65535,udp:0-65535,icmp --network "taw-custom-network" --source-ranges "10.0.0.0/16","10.2.0.0/16","10.1.0.0/16"
+
+gcloud compute firewall-rules create "nw101-allow-ssh" --allow tcp:22 --network "taw-custom-network" --target-tags "ssh"
+
+gcloud compute firewall-rules create "nw101-allow-rdp" --allow tcp:3389 --network "taw-custom-network"
+
+
+# Task 6. Connecting to your lab VMs and checking latency
+
+# Step 1: create an instance named us-test-01 in the subnet-us-east1 subnet:
+gcloud compute instances create us-test-01 \
+    --subnet subnet-us-east1 \
+    --zone us-east1-b \
+    --machine-type e2-standard-2 \
+    --tags ssh,http,rules
+
+# Step 2: Now make the us-test-02 and us-test-03 VMs in their correlated subnets:
+gcloud compute instances create us-test-02 \
+--subnet subnet-europe-west1 \
+--zone europe-west1-d \
+--machine-type e2-standard-2 \
+--tags ssh,http,rules
+
+gcloud compute instances create us-test-03 \
+--subnet subnet-us-east4 \
+--zone us-east4-b \
+--machine-type e2-standard-2 \
+--tags ssh,http,rules
+
+# ping -c 3 <us-test-02-external-ip-address>
+ping -c 3 104.199.82.189
+
+# ping -c 3 <us-test-03-external-ip-address>
+ping -c 3 34.85.187.189
+
+ping -c 3 34.73.47.21
+
+# Use ping to measure latency
+
+# To observe the latency from the US Central region to the Europe West region, 
+# run the following command after opening an SSH window on the us-test-01:
+ping -c 3 us-test-02.europe-west1-d
+
+
+# Task 7. Traceroute and Performance testing
+# Traceroute is a tool to trace the path between two hosts. A traceroute can be a helpful first step to uncovering many different types of network problems.
+# For this step go back to using the us-test-01 VM and us-test-02 VM and SSH into both of them.
+# Install these performance tools in the SSH window for us-test-01:
+sudo apt-get update
+sudo apt-get -y install traceroute mtr tcpdump iperf whois host dnsutils siege
+
+# Task 8. Use iperf to test performance
+# Between two hosts
+# SSH into us-test-02 and install the performance tools:
+sudo apt-get update
+sudo apt-get -y install traceroute mtr tcpdump iperf whois host dnsutils siege
+
+# SSH into us-test-01 and run:
+iperf -s #run in server mode
+
+# On us-test-02 SSH run this iperf:
+iperf -c us-test-01.us-east1-b #run in client mode
+
+# iperf -c us-test-01.us-east1-b #run in client mode
+# Between VMs within a region
+
+# In Cloud Shell, create us-test-04:
+gcloud compute instances create us-test-04 \
+--subnet subnet-us-east1 \
+--zone us-east1-c \
+--tags ssh,http
+
+# On us-test-02 SSH run:
+iperf -s -u #iperf server side
+
+# On us-test-01 SSH run:
+iperf -c us-test-02.europe-west1-d -u -b 2G #iperf client side - send 2 Gbits/s
+
+# In the SSH window for us-test-01 run:
+iperf -s
+
+# In the SSH window for us-test-02 run:
+iperf -c us-test-01.us-east1-b -P 20
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Step 1: 
+# Step 1: 
+# Step 1: 
+# Step 1: 
+# Step 1: 
+# Step 1: 
+# Step 1: 
+# Step 1: 
+# Step 1: 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
